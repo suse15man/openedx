@@ -6,6 +6,7 @@ The following are currently implemented:
     2. LoginWithAccessTokenView:
        1st party (open-edx) OAuth 2.0 access token -> session cookie
 """
+from edx_rest_framework_extensions.auth.jwt.authentication import JwtAuthentication
 import django.contrib.auth as auth
 import social_django.utils as social_utils
 from django.conf import settings
@@ -106,7 +107,7 @@ class LoginWithAccessTokenView(APIView):
     """
     View for exchanging an access token for session cookies
     """
-    authentication_classes = (BearerAuthenticationAllowInactiveUser,)
+    authentication_classes = (BearerAuthenticationAllowInactiveUser, JwtAuthentication)
     permission_classes = (permissions.IsAuthenticated,)
 
     @staticmethod
@@ -145,7 +146,8 @@ class LoginWithAccessTokenView(APIView):
         if not hasattr(request.user, 'backend'):
             request.user.backend = self._get_path_of_arbitrary_backend_for_user(request.user)
 
-        if not self._is_grant_password(request.auth):
+        is_jwt_authenticated = isinstance(request.successful_authenticator, JwtAuthentication)
+        if not is_jwt_authenticated and not self._is_grant_password(request.auth):
             raise AuthenticationFailed({
                 'error_code': 'non_supported_token',
                 'developer_message': 'Only support DOT type access token with grant type password. '
