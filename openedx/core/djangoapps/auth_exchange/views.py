@@ -146,8 +146,14 @@ class LoginWithAccessTokenView(APIView):
         if not hasattr(request.user, 'backend'):
             request.user.backend = self._get_path_of_arbitrary_backend_for_user(request.user)
 
+        access_token = request.auth
         is_jwt_authenticated = isinstance(request.successful_authenticator, JwtAuthentication)
-        if not is_jwt_authenticated and not self._is_grant_password(request.auth):
+        if is_jwt_authenticated:
+            refresh_token = dot_models.RefreshToken.objects.filter(token=request.data.get('refresh_token')).first()
+            if refresh_token:
+                access_token = refresh_token.access_token
+
+        if not self._is_grant_password(access_token):
             raise AuthenticationFailed({
                 'error_code': 'non_supported_token',
                 'developer_message': 'Only support DOT type access token with grant type password. '
