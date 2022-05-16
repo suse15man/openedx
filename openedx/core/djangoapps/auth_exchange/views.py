@@ -146,12 +146,19 @@ class LoginWithAccessTokenView(APIView):
         if not hasattr(request.user, 'backend'):
             request.user.backend = self._get_path_of_arbitrary_backend_for_user(request.user)
 
-        access_token = request.auth
-        is_jwt_authenticated = isinstance(request.successful_authenticator, JwtAuthentication)
-        if is_jwt_authenticated:
+        if isinstance(request.successful_authenticator, JwtAuthentication):
             refresh_token = dot_models.RefreshToken.objects.filter(token=request.data.get('refresh_token')).first()
             if refresh_token:
                 access_token = refresh_token.access_token
+            else:
+                raise AuthenticationFailed({
+                    'error_code': 'invalid_refresh_token',
+                    'developer_message': 'Provided refresh token is not valid'
+                })
+
+        else:
+            # If not jwt then it must be bearer token
+            access_token = request.auth
 
         if not self._is_grant_password(access_token):
             raise AuthenticationFailed({

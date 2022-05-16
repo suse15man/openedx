@@ -151,8 +151,8 @@ class TestLoginWithAccessTokenView(TestCase):
         self.user = UserFactory()
         self.oauth2_client = Application.objects.create(client_type=Application.CLIENT_CONFIDENTIAL)
 
-    def _verify_response(self, access_token, expected_status_code,
-                         token_type='Bearer', expected_cookie_name=None, data=None):
+    def _verify_response(self, access_token, expected_status_code, data=None,
+                         token_type='Bearer', expected_cookie_name=None):
         """
         Calls the login_with_access_token endpoint and verifies the response given the expected values.
         """
