@@ -6,6 +6,7 @@ import ddt
 from django.test import TestCase
 from django.test.utils import override_settings
 from django.utils.timezone import now
+from oauth2_provider import models as dot_models
 
 from openedx.core.djangoapps.oauth_dispatch import jwt as jwt_api
 from openedx.core.djangoapps.oauth_dispatch.adapters import DOTAdapter
@@ -22,7 +23,7 @@ class TestCreateJWTs(AccessTokenMixin, TestCase):
         self.user = UserFactory()
         self.default_scopes = ['email', 'profile']
 
-    def _create_client(self, oauth_adapter, client_restricted):
+    def _create_client(self, oauth_adapter, client_restricted, grant_type=dot_models.Application.GRANT_PASSWORD):
         """
         Creates and returns an OAuth client using the given oauth_adapter.
         Configures the client as a RestrictedApplication if client_restricted is
@@ -33,14 +34,15 @@ class TestCreateJWTs(AccessTokenMixin, TestCase):
             user=self.user,
             redirect_uri='',
             client_id='public-client-id',
+            grant_type=grant_type,
         )
         if client_restricted:
             RestrictedApplication.objects.create(application=client)
         return client
 
-    def _get_token_dict(self, client_restricted, oauth_adapter):
+    def _get_token_dict(self, client_restricted, oauth_adapter, grant_type=dot_models.Application.GRANT_PASSWORD):
         """ Creates and returns an (opaque) access token dict """
-        client = self._create_client(oauth_adapter, client_restricted)
+        client = self._create_client(oauth_adapter, client_restricted, grant_type=grant_type)
         expires_in = 60 * 60
         expires = now() + timedelta(seconds=expires_in)
         token_dict = dict(
@@ -163,3 +165,33 @@ class TestCreateJWTs(AccessTokenMixin, TestCase):
         assert jwt_payload['scopes'] == self.default_scopes
         assert jwt_scopes_payload['scopes'] == scopes
         assert jwt_scopes_payload['user_id'] == self.user.id
+
+    def test_password_grant_type(self):
+        oauth_adapter = DOTAdapter()
+        token_dict = self._get_token_dict(client_restricted=False, oauth_adapter=oauth_adapter)
+        jwt_token_dict = jwt_api.create_jwt_token_dict(token_dict, oauth_adapter, use_asymmetric_key=False)
+
+        self.assert_valid_jwt_access_token(
+            jwt_token_dict["access_token"], self.user, self.default_scopes,
+            grant_type=dot_models.Application.GRANT_PASSWORD,
+        )
+
+    def test_empty_str_grant_type(self):
+        oauth_adapter = DOTAdapter()
+        token_dict = self._get_token_dict(client_restricted=False, oauth_adapter=oauth_adapter, grant_type='')
+        jwt_token_dict = jwt_api.create_jwt_token_dict(token_dict, oauth_adapter, use_asymmetric_key=False)
+
+        self.assert_valid_jwt_access_token(
+            jwt_token_dict["access_token"], self.user, self.default_scopes,
+            grant_type='',
+        )
+
+    def test_random_str_grant_type(self):
+        oauth_adapter = DOTAdapter()
+        token_dict = self._get_token_dict(client_restricted=False, oauth_adapter=oauth_adapter, grant_type='test rand')
+        jwt_token_dict = jwt_api.create_jwt_token_dict(token_dict, oauth_adapter, use_asymmetric_key=False)
+
+        self.assert_valid_jwt_access_token(
+            jwt_token_dict["access_token"], self.user, self.default_scopes,
+            grant_type='test rand',
+        )

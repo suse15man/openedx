@@ -71,6 +71,7 @@ def create_jwt_token_dict(token_dict, oauth_adapter, use_asymmetric_key=None):
         use_asymmetric_key=use_asymmetric_key,
         is_restricted=oauth_adapter.is_client_restricted(client),
         filters=oauth_adapter.get_authorization_filters(client),
+        grant_type=access_token.application.authorization_grant_type,
     )
 
     jwt_token_dict = token_dict.copy()
@@ -120,6 +121,7 @@ def _create_jwt(
     additional_claims=None,
     use_asymmetric_key=None,
     secret=None,
+    grant_type=None,
 ):
     """
     Returns an encoded JWT (string).
@@ -132,6 +134,7 @@ def _create_jwt(
         expires_in (int): Optional. Overrides time to token expiry, specified in seconds.
         filters (list): Optional. Filters to include in the JWT.
         is_restricted (Boolean): Whether the client to whom the JWT is issued is restricted.
+        grant_type (str): grant type of the new JWT token.
 
     Deprecated Arguments (to be removed):
         aud (string): Optional. Overrides configured JWT audience claim.
@@ -152,6 +155,7 @@ def _create_jwt(
         # TODO (ARCH-204) Consider getting rid of the 'aud' claim since we don't use it.
         'aud': aud if aud else settings.JWT_AUTH['JWT_AUDIENCE'],
         'exp': exp,
+        'grant_type': grant_type or '',
         'iat': iat,
         'iss': settings.JWT_AUTH['JWT_ISSUER'],
         'preferred_username': user.username,
