@@ -7,17 +7,20 @@ Tests for OAuth token exchange views
 import json
 import unittest
 from datetime import timedelta
+from time import sleep
 
 import ddt
 import httpretty
 from django.conf import settings
 from django.test import TestCase
+from django.test.utils import override_settings
 from django.urls import reverse
 from oauth2_provider.models import Application
 from rest_framework.test import APIClient
 from social_django.models import Partial
 
 from openedx.core.djangoapps.oauth_dispatch import jwt as jwt_api
+from openedx.core.djangoapps.oauth_dispatch.adapters import DOTAdapter
 from openedx.core.djangoapps.oauth_dispatch.tests import factories as dot_factories
 from common.djangoapps.student.tests.factories import UserFactory
 from common.djangoapps.third_party_auth.tests.utils import (
@@ -151,27 +154,22 @@ class TestLoginWithAccessTokenView(TestCase):
         self.user = UserFactory()
         self.oauth2_client = Application.objects.create(client_type=Application.CLIENT_CONFIDENTIAL)
 
-    def _verify_response(self, access_token, expected_status_code, data=None,
-                         token_type='Bearer', expected_cookie_name=None):
+    def _verify_response(self, access_token, expected_status_code, token_type='Bearer', expected_cookie_name=None):
         """
         Calls the login_with_access_token endpoint and verifies the response given the expected values.
         """
         url = reverse("login_with_access_token")
-        response = self.client.post(url, data=data, HTTP_AUTHORIZATION=f"{token_type} {access_token}".encode('utf-8'))
+        response = self.client.post(url, HTTP_AUTHORIZATION=f"{token_type} {access_token}".encode('utf-8'))
         assert response.status_code == expected_status_code
         if expected_cookie_name:
             assert expected_cookie_name in response.cookies
 
-    def _create_dot_access_token(self, grant_type='Client credentials', create_refresh_token=False):
+    def _create_dot_access_token(self, grant_type='Client credentials'):
         """
         Create dot based access token
         """
         dot_application = dot_factories.ApplicationFactory(user=self.user, authorization_grant_type=grant_type)
-        access_token = dot_factories.AccessTokenFactory(user=self.user, application=dot_application)
-        if create_refresh_token:
-            dot_factories.RefreshTokenFactory(user=self.user, application=dot_application, access_token=access_token)
-
-        return access_token
+        return dot_factories.AccessTokenFactory(user=self.user, application=dot_application)
 
     def test_invalid_token(self):
         self._verify_response("invalid_token", expected_status_code=401)
@@ -187,38 +185,46 @@ class TestLoginWithAccessTokenView(TestCase):
         access_token = self._create_dot_access_token()
         self._verify_response(access_token, expected_status_code=401)
 
-    def _create_jwt_token(self):
+    def _create_jwt_token(self, grant_type=Application.GRANT_PASSWORD, scope='email profile'):
         """
         Create jwt token
         """
-        jwt_token = jwt_api.create_jwt_for_user(self.user)
+        access_token = self._create_dot_access_token(grant_type)
+        oauth_adapter = DOTAdapter()
+        token_dict = {
+            'access_token': access_token,
+            'scope': scope,
+        }
+        jwt_token = jwt_api.create_jwt_from_token(token_dict, oauth_adapter)
         return jwt_token
 
-    def test_invalid_jwt_and_valid_refresh_token(self):
-        access_token = self._create_dot_access_token(grant_type='password', create_refresh_token=True)
-        data = {'refresh_token': access_token.refresh_token}
-        self._verify_response("invalid_token", data=data, token_type="JWT", expected_status_code=401)
+    def test_invalid_jwt(self):
+        self._verify_response("invalid_token", token_type="JWT", expected_status_code=401)
 
         assert 'session_key' not in self.client.session
 
-    def test_valid_jwt_and_invalid_refresh_token(self):
-        jwt_token = self._create_jwt_token()
-        data = {'refresh_token': 'invalidtoken'}
-        self._verify_response(jwt_token, data=data, token_type="JWT", expected_status_code=401)
+    def test_valid_jwt_with_not_password_grant(self):
 
-        assert 'session_key' not in self.client.session
-
-    def test_valid_jwt_and_empty_refresh_token(self):
-        jwt_token = self._create_jwt_token()
+        jwt_token = self._create_jwt_token(grant_type='Client credentials')
         self._verify_response(jwt_token, token_type="JWT", expected_status_code=401)
 
         assert 'session_key' not in self.client.session
 
-    def test_valid_jwt_and_refresh_token(self):
+    def test_expired_jwt_with_password_grant(self):
+        with override_settings(JWT_ACCESS_TOKEN_EXPIRE_SECONDS=1):
+            jwt_token = self._create_jwt_token()
+
+        # wait for jwt to expire before sending the request
+        sleep(6)
+
+        self._verify_response(jwt_token, token_type="JWT", expected_status_code=401)
+
+        assert 'session_key' not in self.client.session
+
+    def test_valid_jwt_with_password_grant(self):
+
         jwt_token = self._create_jwt_token()
-        access_token = self._create_dot_access_token(grant_type='password', create_refresh_token=True)
-        data = {'refresh_token': access_token.refresh_token}
-        self._verify_response(jwt_token, data=data, token_type="JWT",
+        self._verify_response(jwt_token, token_type="JWT",
                               expected_status_code=204, expected_cookie_name='sessionid')
 
         assert int(self.client.session['_auth_user_id']) == self.user.id

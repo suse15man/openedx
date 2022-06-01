@@ -6,7 +6,7 @@ The following are currently implemented:
     2. LoginWithAccessTokenView:
        1st party (open-edx) OAuth 2.0 access token -> session cookie
 """
-from edx_rest_framework_extensions.auth.jwt.authentication import JwtAuthentication
+from edx_rest_framework_extensions.auth.jwt.authentication import JwtAuthentication, get_decoded_jwt_from_auth
 import django.contrib.auth as auth
 import social_django.utils as social_utils
 from django.conf import settings
@@ -147,20 +147,13 @@ class LoginWithAccessTokenView(APIView):
             request.user.backend = self._get_path_of_arbitrary_backend_for_user(request.user)
 
         if isinstance(request.successful_authenticator, JwtAuthentication):
-            refresh_token = dot_models.RefreshToken.objects.filter(token=request.data.get('refresh_token')).first()
-            if refresh_token:
-                access_token = refresh_token.access_token
-            else:
-                raise AuthenticationFailed({
-                    'error_code': 'invalid_refresh_token',
-                    'developer_message': 'Provided refresh token is not valid'
-                })
-
+            jwt_payload = get_decoded_jwt_from_auth(request)
+            is_grant_password = jwt_payload['grant_type'] == dot_models.Application.GRANT_PASSWORD
         else:
             # If not jwt then it must be bearer token
-            access_token = request.auth
+            is_grant_password = self._is_grant_password(request.auth)
 
-        if not self._is_grant_password(access_token):
+        if not is_grant_password:
             raise AuthenticationFailed({
                 'error_code': 'non_supported_token',
                 'developer_message': 'Only support DOT type access token with grant type password. '
