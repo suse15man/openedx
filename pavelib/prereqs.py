@@ -139,7 +139,7 @@ def node_prereqs_installation():
     else:
         npm_log_file_path = f'{Env.GEN_LOG_DIR}/npm-install.log'
     npm_log_file = open(npm_log_file_path, 'wb')  # lint-amnesty, pylint: disable=consider-using-with
-    npm_command = 'npm install --verbose'.split()
+    npm_command = 'npm install --verbose --force'.split()
 
     # The implementation of Paver's `sh` function returns before the forked
     # actually returns. Using a Popen object so that we can ensure that

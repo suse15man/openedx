@@ -265,8 +265,6 @@
         .status-indicator {
           background: $orange-d1;
         }
-      }
-    }
 
         .course-actions .action-view .view {
           opacity: 1.0;
@@ -308,8 +306,6 @@
         cursor: pointer;
         display: inline-block;
       }
-    }
-  }
 
       // encompassing course link
       .course-link {
@@ -317,6 +313,8 @@
         width: flex-grid(6, 9);
         margin-right: flex-gutter();
       }
+    }
+  }
 
   .courses,
   .libraries,
@@ -431,8 +429,6 @@
           }
         }
       }
-    }
-  }
 
       .course-actions {
         @extend %ui-depth3;
