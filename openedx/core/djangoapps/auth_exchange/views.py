@@ -13,6 +13,11 @@ from django.contrib.auth import login
 from django.http import HttpResponse
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
+from edx_rest_framework_extensions.auth.jwt.authentication import (
+    JwtAuthentication,
+    get_decoded_jwt_from_auth,
+    is_jwt_authenticated,
+)
 from oauth2_provider import models as dot_models
 from oauth2_provider.views.base import TokenView as DOTAccessTokenView
 from rest_framework import permissions
@@ -106,7 +111,7 @@ class LoginWithAccessTokenView(APIView):
     """
     View for exchanging an access token for session cookies
     """
-    authentication_classes = (BearerAuthenticationAllowInactiveUser,)
+    authentication_classes = (BearerAuthenticationAllowInactiveUser, JwtAuthentication)
     permission_classes = (permissions.IsAuthenticated,)
 
     @staticmethod
@@ -120,14 +125,20 @@ class LoginWithAccessTokenView(APIView):
                 return backend_path
 
     @staticmethod
-    def _is_grant_password(access_token):
+    def _is_grant_password(request):
         """
         Check if the access token provided is DOT based and has password type grant.
         """
-        token_query = dot_models.AccessToken.objects.select_related('user')
-        dot_token = token_query.filter(token=access_token).first()
-        if dot_token and dot_token.application.authorization_grant_type == dot_models.Application.GRANT_PASSWORD:
-            return True
+        if is_jwt_authenticated(request):
+            jwt_payload = get_decoded_jwt_from_auth(request)
+            grant_type = jwt_payload['grant_type']
+            if grant_type and grant_type == dot_models.Application.GRANT_PASSWORD:
+                return True
+        else:
+            token_query = dot_models.AccessToken.objects.select_related('user')
+            dot_token = token_query.filter(token=request.auth).first()
+            if dot_token and dot_token.application.authorization_grant_type == dot_models.Application.GRANT_PASSWORD:
+                return True
 
         return False
 
@@ -145,10 +156,12 @@ class LoginWithAccessTokenView(APIView):
         if not hasattr(request.user, 'backend'):
             request.user.backend = self._get_path_of_arbitrary_backend_for_user(request.user)
 
-        if not self._is_grant_password(request.auth):
+        is_grant_password = self._is_grant_password(request)
+
+        if not is_grant_password:
             raise AuthenticationFailed({
                 'error_code': 'non_supported_token',
-                'developer_message': 'Only support DOT type access token with grant type password. '
+                'developer_message': 'Only access tokens with grant type password are supported. '
             })
 
         login(request, request.user)  # login generates and stores the user's cookies in the session

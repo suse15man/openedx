@@ -7,16 +7,21 @@ Tests for OAuth token exchange views
 import json
 import unittest
 from datetime import timedelta
+from freezegun import freeze_time
+from datetime import datetime
 
 import ddt
 import httpretty
 from django.conf import settings
 from django.test import TestCase
+from django.test.utils import override_settings
 from django.urls import reverse
 from oauth2_provider.models import Application
 from rest_framework.test import APIClient
 from social_django.models import Partial
 
+from openedx.core.djangoapps.oauth_dispatch import jwt as jwt_api
+from openedx.core.djangoapps.oauth_dispatch.adapters import DOTAdapter
 from openedx.core.djangoapps.oauth_dispatch.tests import factories as dot_factories
 from common.djangoapps.student.tests.factories import UserFactory
 from common.djangoapps.third_party_auth.tests.utils import (
@@ -150,12 +155,12 @@ class TestLoginWithAccessTokenView(TestCase):
         self.user = UserFactory()
         self.oauth2_client = Application.objects.create(client_type=Application.CLIENT_CONFIDENTIAL)
 
-    def _verify_response(self, access_token, expected_status_code, expected_cookie_name=None):
+    def _verify_response(self, access_token, expected_status_code, token_type='Bearer', expected_cookie_name=None):
         """
         Calls the login_with_access_token endpoint and verifies the response given the expected values.
         """
         url = reverse("login_with_access_token")
-        response = self.client.post(url, HTTP_AUTHORIZATION=f"Bearer {access_token}".encode('utf-8'))
+        response = self.client.post(url, HTTP_AUTHORIZATION=f"{token_type} {access_token}".encode('utf-8'))
         assert response.status_code == expected_status_code
         if expected_cookie_name:
             assert expected_cookie_name in response.cookies
@@ -180,3 +185,46 @@ class TestLoginWithAccessTokenView(TestCase):
     def test_dot_client_credentials_unsupported(self):
         access_token = self._create_dot_access_token()
         self._verify_response(access_token, expected_status_code=401)
+
+    def _create_jwt_token(self, grant_type='password', scope='email profile'):
+        """
+        Create jwt token
+        """
+        access_token = self._create_dot_access_token(grant_type)
+        oauth_adapter = DOTAdapter()
+        token_dict = {
+            'access_token': access_token,
+            'scope': scope,
+        }
+        jwt_token = jwt_api.create_jwt_from_token(token_dict, oauth_adapter)
+        return jwt_token
+
+    def test_invalid_jwt(self):
+        self._verify_response("invalid_token", token_type="JWT", expected_status_code=401)
+
+        assert 'session_key' not in self.client.session
+
+    def test_valid_jwt_with_not_password_grant(self):
+
+        jwt_token = self._create_jwt_token(grant_type='Client credentials')
+        self._verify_response(jwt_token, token_type="JWT", expected_status_code=401)
+
+        assert 'session_key' not in self.client.session
+
+    def test_expired_jwt_with_password_grant(self):
+        with override_settings(JWT_ACCESS_TOKEN_EXPIRE_SECONDS=1):
+            jwt_token = self._create_jwt_token()
+
+        # freeze_time will pretend 10 seconds have passed!
+        with freeze_time(lambda: datetime.utcnow() + timedelta(seconds=10)):
+            self._verify_response(jwt_token, token_type="JWT", expected_status_code=401)
+
+        assert 'session_key' not in self.client.session
+
+    def test_valid_jwt_with_password_grant(self):
+
+        jwt_token = self._create_jwt_token()
+        self._verify_response(jwt_token, token_type="JWT",
+                              expected_status_code=204, expected_cookie_name='sessionid')
+
+        assert int(self.client.session['_auth_user_id']) == self.user.id
