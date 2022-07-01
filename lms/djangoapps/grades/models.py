@@ -13,6 +13,7 @@ import logging
 from base64 import b64encode
 from collections import defaultdict, namedtuple
 from hashlib import sha1
+from jsonfield import JSONField
 
 from django.apps import apps
 from django.db import models, IntegrityError, transaction
@@ -797,3 +798,21 @@ class PersistentSubsectionGradeOverride(models.Model):
                 getattr(subsection_grade_model, field_name)
             )
         return cleaned_data
+
+
+class PassedLearnerEvent(TimeStampedModel):
+    """
+    This model is used to track segement events sent for passed learners in 
+    lms/djangoapps/grades/events.py::fire_segment_event_on_course_grade_passed_first_time
+    """
+
+    user_id = models.IntegerField(blank=False, null=False)
+    data = JSONField(blank=False, null=False)
+    follow_up_date = models.DateField(null=False, blank=False)
+
+    class Meta:
+        app_label = "grades"
+        indexes = [
+            models.Index(fields=['follow_up_date']),
+            models.Index(fields=['created']),
+        ]
