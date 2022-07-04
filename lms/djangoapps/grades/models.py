@@ -13,12 +13,11 @@ import logging
 from base64 import b64encode
 from collections import defaultdict, namedtuple
 from hashlib import sha1
-from jsonfield import JSONField
 
 from django.apps import apps
-from django.db import models, IntegrityError, transaction
-
+from django.db import IntegrityError, models, transaction
 from django.utils.timezone import now
+from jsonfield import JSONField
 from lazy import lazy
 from model_utils.models import TimeStampedModel
 from opaque_keys.edx.django.models import CourseKeyField, UsageKeyField
@@ -27,8 +26,9 @@ from simple_history.models import HistoricalRecords
 
 from lms.djangoapps.courseware.fields import UnsignedBigIntAutoField
 from lms.djangoapps.grades import events  # lint-amnesty, pylint: disable=unused-import
-from openedx.core.lib.cache_utils import get_cache
+from lms.djangoapps.grades.constants import LEARNER_PASSED_COURSE_FIRST_TIME_EVENT_TYPE
 from lms.djangoapps.grades.signals.signals import COURSE_GRADE_PASSED_FIRST_TIME
+from openedx.core.lib.cache_utils import get_cache
 
 log = logging.getLogger(__name__)
 
@@ -800,15 +800,21 @@ class PersistentSubsectionGradeOverride(models.Model):
         return cleaned_data
 
 
-class PassedLearnerEvent(TimeStampedModel):
-    """
-    This model is used to track segement events sent for passed learners in 
-    lms/djangoapps/grades/events.py::fire_segment_event_on_course_grade_passed_first_time
-    """
+class LearnerCourseEvent(TimeStampedModel):
 
-    user_id = models.IntegerField(blank=False, null=False)
-    data = JSONField(blank=False, null=False)
-    follow_up_date = models.DateField(null=False, blank=False)
+    user_id = models.IntegerField()
+    course_id = CourseKeyField(blank=False, max_length=255)
+    data = JSONField()
+    follow_up_date = models.DateField()
+
+    EVENT_CHOICES = [
+        (LEARNER_PASSED_COURSE_FIRST_TIME_EVENT_TYPE, LEARNER_PASSED_COURSE_FIRST_TIME_EVENT_TYPE),
+    ]
+    event_type = models.CharField(
+        max_length=255,
+        choices=EVENT_CHOICES,
+        default=LEARNER_PASSED_COURSE_FIRST_TIME_EVENT_TYPE,
+    )
 
     class Meta:
         app_label = "grades"

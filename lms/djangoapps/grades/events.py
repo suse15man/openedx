@@ -1,9 +1,11 @@
 """
 Emits course grade events.
 """
+from datetime import timedelta
 from logging import getLogger
 
 from crum import get_current_user
+from django.utils import timezone
 from eventtracking import tracker
 
 from common.djangoapps.course_modes.models import CourseMode
@@ -15,6 +17,7 @@ from common.djangoapps.track.event_transaction_utils import (
     get_event_transaction_type,
     set_event_transaction_type
 )
+from lms.djangoapps.grades.constants import LEARNER_PASSED_COURSE_FIRST_TIME_EVENT_TYPE
 from openedx.core.djangoapps.content.course_overviews.models import CourseOverview
 from openedx.features.enterprise_support.context import get_enterprise_event_context
 
@@ -30,7 +33,7 @@ SUBSECTION_GRADE_CALCULATED = 'edx.grades.subsection.grade_calculated'
 COURSE_GRADE_PASSED_FIRST_TIME_EVENT_TYPE = 'edx.course.grade.passed.first_time'
 COURSE_GRADE_NOW_PASSED_EVENT_TYPE = 'edx.course.grade.now_passed'
 COURSE_GRADE_NOW_FAILED_EVENT_TYPE = 'edx.course.grade.now_failed'
-LEARNER_PASSED_COURSE_FIRST_TIME = 'edx.course.learner.passed.first_time'
+LEARNER_PASSED_COURSE_FIRST_TIME = LEARNER_PASSED_COURSE_FIRST_TIME_EVENT_TYPE
 
 
 def grade_updated(**kwargs):
@@ -215,6 +218,9 @@ def fire_segment_event_on_course_grade_passed_first_time(user_id, course_locator
 
     * Event should be only fired for learners enrolled in paid enrollment modes.
     """
+    # Avoid circular import
+    from lms.djangoapps.grades.models import LearnerCourseEvent
+
     event_name = LEARNER_PASSED_COURSE_FIRST_TIME
     courserun_key = str(course_locator)
     courserun_org = course_locator.org
@@ -246,5 +252,15 @@ def fire_segment_event_on_course_grade_passed_first_time(user_id, course_locator
         'COURSE_ORG_NAME': courserun_org,
     }
     segment.track(user_id, event_name, event_properties)
+
+    # add event data into model
+    ninety_day_follow_up_date = timezone.now().date() + timedelta(days=90)
+    LearnerCourseEvent.objects.create(
+        user_id=user_id,
+        course_id=course_locator,
+        data=event_properties,
+        follow_up_date=ninety_day_follow_up_date,
+        event_type=LEARNER_PASSED_COURSE_FIRST_TIME
+    )
 
     log.info("Segment event fired for passed learners. Event: [{}], Data: [{}]".format(event_name, event_properties))

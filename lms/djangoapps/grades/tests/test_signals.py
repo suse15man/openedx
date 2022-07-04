@@ -4,22 +4,24 @@ Tests for the score change signals defined in the courseware models module.
 
 
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import ddt
 import pytest
 import pytz
 from django.test import TestCase
+from django.utils import timezone
 from opaque_keys.edx.locator import CourseLocator
 from submissions.models import score_reset, score_set
-from xmodule.modulestore.tests.django_utils import ModuleStoreTestCase
 
 from common.djangoapps.student.tests.factories import CourseEnrollmentFactory, UserFactory
 from common.djangoapps.track.event_transaction_utils import get_event_transaction_id, get_event_transaction_type
 from common.djangoapps.util.date_utils import to_timestamp
-from lms.djangoapps.grades.models import PersistentCourseGrade
+from lms.djangoapps.grades.constants import LEARNER_PASSED_COURSE_FIRST_TIME_EVENT_TYPE
+from lms.djangoapps.grades.models import LearnerCourseEvent, PersistentCourseGrade
 from openedx.core.djangoapps.content.course_overviews.tests.factories import CourseOverviewFactory
+from xmodule.modulestore.tests.django_utils import ModuleStoreTestCase
 
 from ..constants import ScoreDatabaseTableEnum
 from ..signals.handlers import (
@@ -418,10 +420,23 @@ class CourseEventsSignalsTest(ModuleStoreTestCase):
         __ = PersistentCourseGrade.update_or_create(**params)
         segment_track_mock.assert_called_with(
             self.user.id,
-            'edx.course.learner.passed.first_time',
+            LEARNER_PASSED_COURSE_FIRST_TIME_EVENT_TYPE,
             {
                 'LMS_ENROLLMENT_ID': enrollment.id,
                 'COURSE_TITLE': course.display_name,
                 'COURSE_ORG_NAME': course.org,
             }
         )
+
+        assert LearnerCourseEvent.objects.count() == 1
+        learner_course_event = LearnerCourseEvent.objects.first()
+        assert learner_course_event.user_id == self.user.id
+        assert learner_course_event.course_id == course.id
+        assert learner_course_event.event_type == LEARNER_PASSED_COURSE_FIRST_TIME_EVENT_TYPE
+        assert learner_course_event.data == {
+            'LMS_ENROLLMENT_ID': enrollment.id,
+            'COURSE_TITLE': course.display_name,
+            'COURSE_ORG_NAME': course.org,
+        }
+        ninety_day_follow_up_date = timezone.now().date() + timedelta(days=90)
+        assert learner_course_event.follow_up_date == ninety_day_follow_up_date
